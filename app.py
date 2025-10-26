@@ -60,14 +60,21 @@ def load_model():
         
         logger.info(f"Loading model from {model_path} (CPU-only mode)")
         
-        # Load with aggressive CPU-only enforcement
-        with open(model_path, 'rb') as f:
-            # Force all PyTorch tensors to CPU during unpickling
-            model_data = torch.load(
-                f, 
-                map_location='cpu',
-                weights_only=False
-            )
+        # Monkey-patch torch.load to always use CPU
+        original_torch_load = torch.load
+        def cpu_torch_load(*args, **kwargs):
+            kwargs['map_location'] = 'cpu'
+            return original_torch_load(*args, **kwargs)
+        
+        torch.load = cpu_torch_load
+        
+        try:
+            # Load with patched torch.load
+            with open(model_path, 'rb') as f:
+                model_data = pickle.load(f)
+        finally:
+            # Restore original torch.load
+            torch.load = original_torch_load
         
         # Handle different model storage formats
         if isinstance(model_data, dict):
