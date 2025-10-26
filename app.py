@@ -28,6 +28,16 @@ os.environ['MKL_NUM_THREADS'] = '1'
 import torch
 torch.set_num_threads(1)  # Limit CPU threads for memory efficiency
 
+# CRITICAL: Monkey-patch torch.load to ALWAYS use CPU
+_original_torch_load = torch.load
+def _cpu_only_load(*args, **kwargs):
+    """Force all torch.load calls to use CPU"""
+    kwargs['map_location'] = 'cpu'
+    return _original_torch_load(*args, **kwargs)
+torch.load = _cpu_only_load
+
+logger.info("✓ Torch configured for CPU-only mode")
+
 # Initialize Flask app
 app = Flask(__name__)
 
