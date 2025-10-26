@@ -1,0 +1,8 @@
+# Git LFS attributes file
+# Track .pkl files with Git LFS
+*.pkl filter=lfs diff=lfs merge=lfs -text
+# You can add other large file types if needed
+# *.h5 filter=lfs diff=lfs merge=lfs -text
+# *.model filter=lfs diff=lfs merge=lfs -text
+# *.bin filter=lfs diff=lfs merge=lfs -text
+*.h5 filter=lfs diff=lfs merge=lfs -text
