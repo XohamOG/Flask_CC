@@ -1,24 +1,28 @@
 # Flask and Web Framework
-Flask==3.0.0
-flask-cors==4.0.0
-Werkzeug==3.0.1
+Flask==3.0.3
+flask-cors==5.0.0
+Werkzeug==3.0.4
 
 # Production WSGI Server
-gunicorn==21.2.0
+gunicorn==23.0.0
 
-# Machine Learning and Data Processing
-scikit-learn==1.3.2
-numpy==1.26.2
-scipy==1.11.4
-transformers==4.35.2
+# Machine Learning and Data Processing (Latest stable versions)
+scikit-learn==1.5.2
+numpy==1.26.4
+scipy==1.14.1
+transformers==4.46.3
+tokenizers==0.20.3
+safetensors==0.4.5
 
-# PyTorch CPU-only version (no CUDA dependencies)
+# PyTorch CPU-only version (Latest stable)
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.1.1+cpu
+torch==2.5.1+cpu
 
-# Additional dependencies that might be needed by your model
-pandas==2.1.4
-joblib==1.3.2
+# Additional dependencies
+pandas==2.2.3
+joblib==1.4.2
+tqdm==4.66.6
+huggingface-hub==0.26.2
 
-# Optional: For better logging in production
+# Logging
 python-json-logger==2.0.7
