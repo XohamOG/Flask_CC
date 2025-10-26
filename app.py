@@ -49,8 +49,15 @@ def load_model():
             raise FileNotFoundError(f"Model file not found at {model_path}")
         
         logger.info(f"Loading model from {model_path}")
+        
+        # Load model with CPU mapping for production servers
+        import torch
         with open(model_path, 'rb') as f:
-            model_data = pickle.load(f)
+            # Force loading to CPU if CUDA is not available
+            if hasattr(torch, 'cuda') and not torch.cuda.is_available():
+                model_data = torch.load(f, map_location=torch.device('cpu'))
+            else:
+                model_data = pickle.load(f)
         
         # Handle different model storage formats
         if isinstance(model_data, dict):
@@ -61,6 +68,11 @@ def load_model():
         else:
             model = model_data
             vectorizer = None
+        
+        # Move model to CPU if it's a PyTorch model
+        if hasattr(model, 'to'):
+            model = model.to('cpu')
+            logger.info("Model moved to CPU")
         
         logger.info("Model loaded successfully")
         return True
