@@ -10,6 +10,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 import traceback
+import io
 
 # Configure logging
 logging.basicConfig(
@@ -17,6 +18,15 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Force CPU-only mode for PyTorch
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+
+# Import torch after setting CPU-only environment
+import torch
+torch.set_num_threads(1)  # Limit CPU threads for memory efficiency
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -39,7 +49,7 @@ model = None
 vectorizer = None
 
 def load_model():
-    """Load the hate speech detection model"""
+    """Load the hate speech detection model - CPU ONLY"""
     global model, vectorizer
     try:
         model_path = os.path.join(os.path.dirname(__file__), 'hate_speech_model.pkl')
@@ -48,36 +58,41 @@ def load_model():
             logger.error(f"Model file not found at {model_path}")
             raise FileNotFoundError(f"Model file not found at {model_path}")
         
-        logger.info(f"Loading model from {model_path}")
+        logger.info(f"Loading model from {model_path} (CPU-only mode)")
         
-        # Load model with CPU mapping for production servers
-        import torch
+        # Load with aggressive CPU-only enforcement
         with open(model_path, 'rb') as f:
-            # Force loading to CPU if CUDA is not available
-            if hasattr(torch, 'cuda') and not torch.cuda.is_available():
-                model_data = torch.load(f, map_location=torch.device('cpu'))
-            else:
-                model_data = pickle.load(f)
+            # Force all PyTorch tensors to CPU during unpickling
+            model_data = torch.load(
+                f, 
+                map_location='cpu',
+                weights_only=False
+            )
         
         # Handle different model storage formats
         if isinstance(model_data, dict):
             model = model_data.get('model')
             vectorizer = model_data.get('vectorizer')
+            logger.info("Model format: dictionary")
         elif isinstance(model_data, tuple):
             model, vectorizer = model_data
+            logger.info("Model format: tuple")
         else:
             model = model_data
             vectorizer = None
+            logger.info("Model format: single object")
         
-        # Move model to CPU if it's a PyTorch model
+        # Force model to CPU and eval mode
         if hasattr(model, 'to'):
-            model = model.to('cpu')
-            logger.info("Model moved to CPU")
+            model.to('cpu')
+            model.eval()
+            logger.info("Model set to CPU and eval mode")
         
-        logger.info("Model loaded successfully")
+        logger.info("✓ Model loaded successfully on CPU")
         return True
+        
     except Exception as e:
-        logger.error(f"Error loading model: {str(e)}")
+        logger.error(f"✗ Error loading model: {str(e)}")
         logger.error(traceback.format_exc())
         return False
 
@@ -238,23 +253,24 @@ def predict():
                 "status": 400
             }), 400
         
-        # Preprocess and predict
-        if vectorizer is not None:
-            text_vectorized = vectorizer.transform([text])
-            prediction = model.predict(text_vectorized)[0]
-            
-            # Get probability if available
-            confidence = None
-            if hasattr(model, 'predict_proba'):
-                proba = model.predict_proba(text_vectorized)[0]
-                confidence = float(max(proba))
-        else:
-            # If no vectorizer, assume model handles raw text
-            prediction = model.predict([text])[0]
-            confidence = None
-            if hasattr(model, 'predict_proba'):
-                proba = model.predict_proba([text])[0]
-                confidence = float(max(proba))
+        # Preprocess and predict (CPU-only inference)
+        with torch.no_grad():  # Disable gradient computation for inference
+            if vectorizer is not None:
+                text_vectorized = vectorizer.transform([text])
+                prediction = model.predict(text_vectorized)[0]
+                
+                # Get probability if available
+                confidence = None
+                if hasattr(model, 'predict_proba'):
+                    proba = model.predict_proba(text_vectorized)[0]
+                    confidence = float(max(proba))
+            else:
+                # If no vectorizer, assume model handles raw text
+                prediction = model.predict([text])[0]
+                confidence = None
+                if hasattr(model, 'predict_proba'):
+                    proba = model.predict_proba([text])[0]
+                    confidence = float(max(proba))
         
         # Prepare response
         result = {
@@ -338,24 +354,25 @@ def batch_predict():
                 "status": 400
             }), 400
         
-        # Preprocess and predict
+        # Preprocess and predict (CPU-only inference)
         results = []
         
-        if vectorizer is not None:
-            texts_vectorized = vectorizer.transform(texts)
-            predictions = model.predict(texts_vectorized)
-            
-            # Get probabilities if available
-            confidences = None
-            if hasattr(model, 'predict_proba'):
-                probas = model.predict_proba(texts_vectorized)
-                confidences = [float(max(proba)) for proba in probas]
-        else:
-            predictions = model.predict(texts)
-            confidences = None
-            if hasattr(model, 'predict_proba'):
-                probas = model.predict_proba(texts)
-                confidences = [float(max(proba)) for proba in probas]
+        with torch.no_grad():  # Disable gradient computation for inference
+            if vectorizer is not None:
+                texts_vectorized = vectorizer.transform(texts)
+                predictions = model.predict(texts_vectorized)
+                
+                # Get probabilities if available
+                confidences = None
+                if hasattr(model, 'predict_proba'):
+                    probas = model.predict_proba(texts_vectorized)
+                    confidences = [float(max(proba)) for proba in probas]
+            else:
+                predictions = model.predict(texts)
+                confidences = None
+                if hasattr(model, 'predict_proba'):
+                    probas = model.predict_proba(texts)
+                    confidences = [float(max(proba)) for proba in probas]
         
         # Prepare results
         for i, (text, prediction) in enumerate(zip(texts, predictions)):

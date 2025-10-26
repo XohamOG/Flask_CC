@@ -5,7 +5,7 @@ services:
     region: oregon  # Choose your preferred region
     plan: free  # Use 'starter' or higher for production
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --workers 4 --threads 2 --timeout 120
+    startCommand: gunicorn app:app --workers 2 --threads 1 --timeout 120 --worker-class gthread --max-requests 1000 --max-requests-jitter 50
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
