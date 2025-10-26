@@ -9,6 +9,4 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
-      - key: PORT
-        sync: false
     healthCheckPath: /health
