@@ -59,7 +59,7 @@ model = None
 vectorizer = None
 
 def load_model():
-    """Load the hate speech detection model - CPU ONLY"""
+    """Load the hate speech detection model - CPU ONLY, Memory Optimized"""
     global model, vectorizer
     try:
         model_path = os.path.join(os.path.dirname(__file__), 'hate_speech_model.pkl')
@@ -70,10 +70,15 @@ def load_model():
         
         logger.info(f"Loading model from {model_path} (CPU-only mode)")
         
+        # Memory optimization: Load with low memory mode
+        import gc
+        gc.collect()  # Clear memory before loading
+        
         # Monkey-patch torch.load to always use CPU
         original_torch_load = torch.load
         def cpu_torch_load(*args, **kwargs):
             kwargs['map_location'] = 'cpu'
+            kwargs['weights_only'] = False
             return original_torch_load(*args, **kwargs)
         
         torch.load = cpu_torch_load
@@ -103,7 +108,22 @@ def load_model():
         if hasattr(model, 'to'):
             model.to('cpu')
             model.eval()
+            
+            # Memory optimization: Set model to use less memory
+            if hasattr(model, 'config'):
+                model.config.use_cache = False
+            
+            # Use half precision if possible (reduces memory by 50%)
+            try:
+                model.half()
+                logger.info("Model converted to half precision (FP16)")
+            except:
+                logger.info("Model kept in full precision")
+            
             logger.info("Model set to CPU and eval mode")
+        
+        # Clear unnecessary memory
+        gc.collect()
         
         logger.info("✓ Model loaded successfully on CPU")
         return True
