@@ -1,6 +1,7 @@
 """
 Hate Speech Detection API
-A production-ready Flask API for detecting hate speech using a scikit-learn model.
+A production-ready Flask API for detecting hate speech using ML models.
+Supports both scikit-learn and TensorFlow/Keras models.
 """
 
 import os
@@ -10,6 +11,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 import traceback
+import numpy as np
 
 # Configure logging
 logging.basicConfig(
@@ -34,13 +36,17 @@ CORS(app, resources={
 app.config['JSON_SORT_KEYS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max request size
 
-# Global variable to store the model
+# Global variables to store the model
 model = None
 vectorizer = None
+tokenizer = None
+max_sequence_length = None
+model_type = None  # 'sklearn' or 'deep_learning'
+keras_model = None
 
 def load_model():
-    """Load the hate speech detection model - Lightweight scikit-learn model"""
-    global model, vectorizer
+    """Load the hate speech detection model - Supports sklearn and TensorFlow models"""
+    global model, vectorizer, tokenizer, max_sequence_length, model_type, keras_model
     try:
         model_path = os.path.join(os.path.dirname(__file__), 'hate_speech_model.pkl')
         
@@ -50,24 +56,52 @@ def load_model():
         
         logger.info(f"Loading model from {model_path}")
         
-        # Load model (scikit-learn pickle format)
+        # Load model package
         with open(model_path, 'rb') as f:
             model_data = pickle.load(f)
         
-        # Handle different model storage formats
+        # Detect model type and load accordingly
         if isinstance(model_data, dict):
-            model = model_data.get('model')
-            vectorizer = model_data.get('vectorizer')
-            logger.info("Model format: dictionary")
+            if 'model_type' in model_data and model_data['model_type'] == 'deep_learning':
+                # Load TensorFlow/Keras model
+                logger.info("Detected deep learning model")
+                model_type = 'deep_learning'
+                
+                import tensorflow as tf
+                from tensorflow.keras.models import load_model as keras_load_model
+                from tensorflow.keras.preprocessing.sequence import pad_sequences
+                
+                keras_model_path = model_data.get('model_path', 'hate_speech_model_advanced.h5')
+                keras_model = keras_load_model(keras_model_path)
+                tokenizer = model_data.get('tokenizer')
+                max_sequence_length = model_data.get('max_sequence_length', 100)
+                
+                logger.info(f"✓ Keras model loaded from {keras_model_path}")
+                logger.info(f"  - Sequence length: {max_sequence_length}")
+                logger.info(f"  - Vocabulary size: {model_data.get('vocab_size', 'N/A')}")
+                logger.info(f"  - Model accuracy: {model_data.get('accuracy', 'N/A'):.4f}")
+                
+            else:
+                # Load scikit-learn model
+                logger.info("Detected scikit-learn model")
+                model_type = 'sklearn'
+                model = model_data.get('model')
+                vectorizer = model_data.get('vectorizer')
+                logger.info("✓ Scikit-learn model loaded")
+                
         elif isinstance(model_data, tuple):
+            # Tuple format (sklearn)
+            model_type = 'sklearn'
             model, vectorizer = model_data
-            logger.info("Model format: tuple")
+            logger.info("Model format: tuple (sklearn)")
         else:
+            # Single model object (sklearn)
+            model_type = 'sklearn'
             model = model_data
             vectorizer = None
-            logger.info("Model format: single object")
+            logger.info("Model format: single object (sklearn)")
         
-        logger.info("✓ Model loaded successfully")
+        logger.info(f"✓ Model loaded successfully (type: {model_type})")
         return True
         
     except Exception as e:
@@ -232,36 +266,49 @@ def predict():
                 "status": 400
             }), 400
         
-        # Preprocess and predict
-        if vectorizer is not None:
-            text_vectorized = vectorizer.transform([text])
-            prediction = model.predict(text_vectorized)[0]
+        # Preprocess and predict based on model type
+        if model_type == 'deep_learning':
+            # Use TensorFlow/Keras model
+            from tensorflow.keras.preprocessing.sequence import pad_sequences
             
-            # Get probability if available
-            confidence = None
-            if hasattr(model, 'predict_proba'):
-                proba = model.predict_proba(text_vectorized)[0]
-                confidence = float(max(proba))
+            sequences = tokenizer.texts_to_sequences([text])
+            padded = pad_sequences(sequences, maxlen=max_sequence_length, padding='post', truncating='post')
+            pred_proba = keras_model.predict(padded, verbose=0)[0][0]
+            prediction = 1 if pred_proba > 0.5 else 0
+            confidence = float(pred_proba if pred_proba > 0.5 else 1 - pred_proba)
+            
         else:
-            # If no vectorizer, assume model handles raw text
-            prediction = model.predict([text])[0]
-            confidence = None
-            if hasattr(model, 'predict_proba'):
-                proba = model.predict_proba([text])[0]
-                confidence = float(max(proba))
+            # Use scikit-learn model
+            if vectorizer is not None:
+                text_vectorized = vectorizer.transform([text])
+                prediction = model.predict(text_vectorized)[0]
+                
+                # Get probability if available
+                confidence = None
+                if hasattr(model, 'predict_proba'):
+                    proba = model.predict_proba(text_vectorized)[0]
+                    confidence = float(max(proba))
+            else:
+                # If no vectorizer, assume model handles raw text
+                prediction = model.predict([text])[0]
+                confidence = None
+                if hasattr(model, 'predict_proba'):
+                    proba = model.predict_proba([text])[0]
+                    confidence = float(max(proba))
         
         # Prepare response
         result = {
             "text": text,
             "prediction": int(prediction),
             "label": "hate_speech" if prediction == 1 else "normal",
+            "model_type": model_type,
             "status": "success"
         }
         
         if confidence is not None:
             result["confidence"] = confidence
         
-        logger.info(f"Prediction made: {result['label']} (confidence: {confidence})")
+        logger.info(f"Prediction made: {result['label']} (confidence: {confidence}, model: {model_type})")
         return jsonify(result), 200
         
     except Exception as e:
@@ -332,24 +379,36 @@ def batch_predict():
                 "status": 400
             }), 400
         
-        # Preprocess and predict
+        # Preprocess and predict based on model type
         results = []
         
-        if vectorizer is not None:
-            texts_vectorized = vectorizer.transform(texts)
-            predictions = model.predict(texts_vectorized)
+        if model_type == 'deep_learning':
+            # Use TensorFlow/Keras model
+            from tensorflow.keras.preprocessing.sequence import pad_sequences
             
-            # Get probabilities if available
-            confidences = None
-            if hasattr(model, 'predict_proba'):
-                probas = model.predict_proba(texts_vectorized)
-                confidences = [float(max(proba)) for proba in probas]
+            sequences = tokenizer.texts_to_sequences(texts)
+            padded = pad_sequences(sequences, maxlen=max_sequence_length, padding='post', truncating='post')
+            pred_probas = keras_model.predict(padded, verbose=0).flatten()
+            predictions = (pred_probas > 0.5).astype(int)
+            confidences = [float(p if p > 0.5 else 1 - p) for p in pred_probas]
+            
         else:
-            predictions = model.predict(texts)
-            confidences = None
-            if hasattr(model, 'predict_proba'):
-                probas = model.predict_proba(texts)
-                confidences = [float(max(proba)) for proba in probas]
+            # Use scikit-learn model
+            if vectorizer is not None:
+                texts_vectorized = vectorizer.transform(texts)
+                predictions = model.predict(texts_vectorized)
+                
+                # Get probabilities if available
+                confidences = None
+                if hasattr(model, 'predict_proba'):
+                    probas = model.predict_proba(texts_vectorized)
+                    confidences = [float(max(proba)) for proba in probas]
+            else:
+                predictions = model.predict(texts)
+                confidences = None
+                if hasattr(model, 'predict_proba'):
+                    probas = model.predict_proba(texts)
+                    confidences = [float(max(proba)) for proba in probas]
         
         # Prepare results
         for i, (text, prediction) in enumerate(zip(texts, predictions)):
