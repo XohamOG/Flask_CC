@@ -6,23 +6,11 @@ Werkzeug==3.0.4
 # Production WSGI Server
 gunicorn==23.0.0
 
-# Machine Learning and Data Processing (Latest stable versions)
+# Machine Learning (Lightweight - scikit-learn only)
 scikit-learn==1.5.2
 numpy==1.26.4
 scipy==1.14.1
-transformers==4.46.3
-tokenizers==0.20.3
-safetensors==0.4.5
-
-# PyTorch CPU-only version (Latest stable)
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.5.1+cpu
-
-# Additional dependencies
-pandas==2.2.3
 joblib==1.4.2
-tqdm==4.66.6
-huggingface-hub==0.26.2
 
 # Logging
 python-json-logger==2.0.7
